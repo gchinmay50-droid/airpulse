@@ -48,5 +48,26 @@ services:
       redpanda:
         condition: service_healthy
 
+  # Validated readings land here. Postgres 16; same tool as project 1.
+  postgres:
+    image: postgres:16-alpine
+    container_name: airpulse-postgres
+    environment:
+      POSTGRES_USER: airpulse
+      POSTGRES_PASSWORD: airpulse      # local dev only; never reuse this pattern in prod
+      POSTGRES_DB: airpulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Any .sql in this folder runs ONCE, on first start, in filename order.
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airpulse -d airpulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   redpanda-data:
+  postgres-data:
