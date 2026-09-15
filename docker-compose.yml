@@ -1,0 +1,52 @@
+# AirPulse local infrastructure.
+# Start:  docker compose up -d      Stop: docker compose down
+# Wipe:   docker compose down -v    (the -v deletes the data volume too)
+
+services:
+
+  # Redpanda = a Kafka-compatible broker in ONE binary, no ZooKeeper, no JVM.
+  # Every Kafka client, tool and concept works unchanged against it.
+  redpanda:
+    image: redpandadata/redpanda:v25.3.17
+    container_name: airpulse-redpanda
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container        # relaxes production checks for a laptop
+      - --smp=1                     # one CPU core
+      - --memory=1G
+      - --overprovisioned           # tell it the CPU is shared, not dedicated
+      - --node-id=0
+      # THE classic Kafka networking gotcha, solved up front:
+      # a client first connects, then the broker tells it "actually talk to me
+      # at <advertised address>". If that address only resolves inside Docker,
+      # clients on your laptop hang forever. So we run TWO listeners:
+      #   internal  -> other containers reach it as  redpanda:9092
+      #   external  -> your laptop reaches it as     localhost:19092
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"   # Kafka API, for producers/consumers running on the host
+      - "9644:9644"     # admin API + Prometheus metrics
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data   # messages survive a restart
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Web UI to browse topics and read messages. Purely for our eyes.
+  console:
+    image: redpandadata/console:v3.11.0
+    container_name: airpulse-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092      # inside Docker, so the INTERNAL listener
+    ports:
+      - "8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+volumes:
+  redpanda-data:
