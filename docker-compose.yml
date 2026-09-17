@@ -68,6 +68,38 @@ services:
       timeout: 3s
       retries: 10
 
+  # Apache Flink: the stream processor. JobManager schedules, TaskManager runs.
+  # Same custom image for both (Flink + connector JARs), built from flink/Dockerfile.
+  flink-jobmanager:
+    build: ./flink
+    container_name: airpulse-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"               # Flink web UI
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        state.checkpoints.dir: file:///tmp/flink-checkpoints
+    volumes:
+      - ./flink/sql:/opt/flink/sql:ro     # our SQL jobs, submitted via sql-client
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  flink-taskmanager:
+    build: ./flink
+    container_name: airpulse-taskmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        state.checkpoints.dir: file:///tmp/flink-checkpoints
+    depends_on:
+      - flink-jobmanager
+
 volumes:
   redpanda-data:
   postgres-data:
