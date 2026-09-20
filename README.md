@@ -8,7 +8,7 @@ per-station AQI — one that says "insufficient data" instead of inventing a num
 
 ```
 CPCB feed ──▶ producer ──▶ Redpanda (Kafka) ──▶ Flink SQL ──▶ Postgres (gold) ──▶ dashboard
- (hourly)     (Python)     aqi.readings.raw      2 jobs        station_aqi_hourly    (next)
+ (hourly)     (Python)     aqi.readings.raw      2 jobs        station_aqi_hourly    FastAPI + PWA
                                 │                              station_completeness_24h
                                 └──▶ validation sink ──▶ Postgres (bronze: readings)
 ```
@@ -23,7 +23,7 @@ Every AQI app in India shows you a number. Almost none of them tell you:
   indication of whether those rules hold. AirPulse applies the rules and
   reports *why* when they fail.
 - **how far away the station is.** Only ~12% of Indian cities have a monitor.
-  The dashboard (Stage C) will show distance and a confidence label rather
+  The dashboard shows distance and a confidence label rather
   than presenting a station 40 km away as "your air".
 
 ## What is running
