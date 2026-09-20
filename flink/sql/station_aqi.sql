@@ -1,5 +1,6 @@
 -- AirPulse Stage B: per-station AQI, computed by Apache Flink from the raw topic.
--- Submit:  docker exec airpulse-jobmanager ./bin/sql-client.sh -f /opt/flink/sql/station_aqi.sql
+-- Submit (from Git Bash prefix with MSYS_NO_PATHCONV=1):
+--   docker exec airpulse-jobmanager ./bin/sql-client.sh -f /opt/flink/sql/station_aqi.sql
 
 SET 'execution.checkpointing.interval' = '60 s';
 SET 'table.local-time-zone' = 'UTC';
@@ -14,7 +15,7 @@ CREATE TABLE readings_raw (
     `source`       STRING,
     ingested_at    STRING,
     event_time     STRING,
-    raw ROW<
+    `raw` ROW<
         station STRING, pollutant_id STRING, city STRING, `state` STRING,
         latitude STRING, longitude STRING,
         min_value STRING, max_value STRING, avg_value STRING, last_update STRING
@@ -39,16 +40,16 @@ CREATE TABLE readings_raw (
 -- A typed, cleaned view. "NA" and junk become NULL; index must be in [0,500].
 CREATE TEMPORARY VIEW readings AS
 SELECT
-    raw.station  AS station,
-    raw.pollutant_id AS pollutant,
-    raw.city AS city, raw.`state` AS `state`,
-    TRY_CAST(raw.latitude  AS DOUBLE) AS latitude,
-    TRY_CAST(raw.longitude AS DOUBLE) AS longitude,
-    CASE WHEN TRY_CAST(raw.avg_value AS DOUBLE) BETWEEN 0 AND 500
-         THEN TRY_CAST(raw.avg_value AS DOUBLE) END AS idx,
+    `raw`.station  AS station,
+    `raw`.pollutant_id AS pollutant,
+    `raw`.city AS city, `raw`.`state` AS `state`,
+    TRY_CAST(`raw`.latitude  AS DOUBLE) AS latitude,
+    TRY_CAST(`raw`.longitude AS DOUBLE) AS longitude,
+    CASE WHEN TRY_CAST(`raw`.avg_value AS DOUBLE) BETWEEN 0 AND 500
+         THEN TRY_CAST(`raw`.avg_value AS DOUBLE) END AS idx,
     ts
 FROM readings_raw
-WHERE raw.station IS NOT NULL AND raw.pollutant_id IS NOT NULL AND ts IS NOT NULL;
+WHERE `raw`.station IS NOT NULL AND `raw`.pollutant_id IS NOT NULL AND ts IS NOT NULL;
 
 -- ---------------------------------------------------------------- SINKS
 CREATE TABLE station_aqi_hourly (
