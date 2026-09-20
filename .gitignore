@@ -18,3 +18,6 @@ Thumbs.db
 
 # Flink connector JARs are fetched by flink/download-jars.sh, not committed
 flink/lib/*.jar
+
+# Runtime logs from producer/sink
+logs/
