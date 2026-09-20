@@ -1,8 +1,8 @@
 """AirPulse read API. Thin by design: it only reads the GOLD tables that Flink
 writes (station_aqi_hourly, station_completeness_24h). No AQI maths lives here.
 
-Run:  uvicorn api.main:app --reload --port 8000
-Docs: http://localhost:8000/docs
+Run:  uvicorn api.main:app --reload --port 8010   (8000 is often reserved by Hyper-V/WSL on Windows)
+Docs: http://localhost:8010/docs
 """
 from __future__ import annotations
 

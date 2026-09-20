@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AirPulse</title>
+<meta name="description" content="Per-station AQI for India, computed with CPCB's sufficiency rules. Says 'insufficient data' instead of inventing a number.">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1b2433">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --bg: #f3f5f8;         --surface: #ffffff;    --line: #d9dfe8;
+    --ink: #1b2433;        --muted: #5b6676;      --accent: #3b48c4;
+    --good: #2e9e4f;       --satisfactory: #8dbd3a; --moderate: #e2b52a;
+    --poor: #e2762a;       --verypoor: #d0342c;   --severe: #7a1f3d;
+    --none: #8a94a3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f141c; --surface: #18202b; --line: #2a3442;
+      --ink: #e8edf4; --muted: #94a0b2; --accent: #8c96f2;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f141c; --surface: #18202b; --line: #2a3442;
+    --ink: #e8edf4; --muted: #94a0b2; --accent: #8c96f2;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 15px/1.5 Manrope, system-ui, -apple-system, sans-serif; padding-inline: 16px; padding-block: 0 48px; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); }
+  button { font: inherit; }
+
+  header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 2; background: var(--bg);
+           display: flex; align-items: center; justify-content: space-between; gap: 12px;
+           padding-block: 14px 10px; border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 20px; }
+  .brand small { font-weight: 500; color: var(--muted); font-size: 12px; margin-left: 8px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .fresh i { width: 8px; height: 8px; border-radius: 50%; background: var(--none); }
+  .fresh[data-status="fresh"] i { background: var(--good); }
+  .fresh[data-status="stale"] i { background: var(--poor); }
+
+  main { max-width: 1040px; margin-inline: auto; display: grid; gap: 20px; padding-top: 20px; }
+  @media (min-width: 860px) { main { grid-template-columns: 420px 1fr; align-items: start; } }
+
+  section h2 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+
+  /* --- near me panel: the one lifted surface on the page --- */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  select { border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 10px; border-radius: 8px; }
+
+  .reading { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: end; }
+  .aqi { font-size: 72px; line-height: 1; font-weight: 600; letter-spacing: -0.03em; }
+  .aqi.none { font-size: 28px; color: var(--muted); line-height: 1.2; align-self: center; }
+  .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; color: #fff; font-weight: 600; font-size: 13px; }
+  .station { grid-column: 1 / -1; font-weight: 600; font-size: 17px; text-wrap: balance; }
+  .meta { grid-column: 1 / -1; color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .conf { border-left: 3px solid var(--none); padding-left: 10px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .conf[data-c="representative"] { border-color: var(--good); }
+  .conf[data-c="indicative"]     { border-color: var(--moderate); }
+  .conf[data-c="not_covered"]    { border-color: var(--verypoor); }
+  .conf b { color: var(--ink); }
+
+  .bars { margin-top: 16px; display: grid; gap: 6px; }
+  .bar { display: grid; grid-template-columns: 52px 1fr 36px; gap: 10px; align-items: center; font-size: 12px; }
+  .bar .lbl { color: var(--muted); }
+  .bar .track { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .bar .fill { height: 100%; width: 0; background: var(--none); border-radius: 4px; transition: width .4s ease; }
+  .bar .val { text-align: right; }
+  .bar.na .val { color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .bar .fill { transition: none; } }
+
+  .others { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 6px; font-size: 13px; }
+  .others div { display: flex; justify-content: space-between; gap: 10px; }
+  .others span:last-child { color: var(--muted); white-space: nowrap; }
+
+  /* --- city table --- */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; background: var(--none); }
+  .insuff { color: var(--muted); font-style: italic; }
+  .rule { font-size: 12px; color: var(--muted); }
+  .rule.ok { color: var(--good); font-weight: 600; }
+  tr { cursor: pointer; }
+  tr:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+  @media (max-width: 520px) {
+    .brand small, th.dom, td.dom { display: none; }
+    .fresh { font-size: 11px; text-align: right; }
+    .rule { white-space: nowrap; }
+  }
+  footer { max-width: 1040px; margin: 28px auto 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .err { color: var(--verypoor); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">AirPulse <small>India · CPCB rules</small></div>
+  <div class="fresh" id="fresh" data-status="unknown"><i></i><span id="freshtext">checking…</span></div>
+</header>
+
+<main>
+  <section>
+    <h2>Near me</h2>
+    <div class="panel">
+      <div class="controls">
+        <button class="btn primary" id="locate">Use my location</button>
+        <select id="city" aria-label="Choose a city"></select>
+      </div>
+      <div id="near"></div>
+      <div class="err" id="nearerr" hidden></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 id="citytitle">Stations</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th class="num">AQI</th><th>Category</th><th>Station</th><th class="dom">Dominant</th><th>16 h rule</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  AQI is computed per station from CPCB sub-indices using the National AQI rules: at least 3 pollutants
+  including PM<sub>2.5</sub> or PM<sub>10</sub>, worst sub-index wins. The “16 h rule” is CPCB’s requirement of 16 of the
+  last 24 hours of data; “unknown” means the station has not been observed for a full 24 h window yet.
+  Distance labels: under 5 km <b>representative</b>, 5–25 km <b>indicative</b>, beyond 25 km <b>not covered</b>.
+</footer>
+
+<script>
+const COLORS = { Good: 'var(--good)', Satisfactory: 'var(--satisfactory)', Moderate: 'var(--moderate)',
+                 Poor: 'var(--poor)', 'Very Poor': 'var(--verypoor)', Severe: 'var(--severe)' };
+const POLL = [['pm25','PM2.5'],['pm10','PM10'],['no2','NO2'],['so2','SO2'],['co','CO'],['o3','O3'],['nh3','NH3']];
+const bandColor = v => v == null ? 'var(--none)' : v <= 50 ? COLORS.Good : v <= 100 ? COLORS.Satisfactory
+  : v <= 200 ? COLORS.Moderate : v <= 300 ? COLORS.Poor : v <= 400 ? COLORS['Very Poor'] : COLORS.Severe;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $ = id => document.getElementById(id);
+const api = async p => { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).detail || r.statusText); return r.json(); };
+
+let all = [];
+
+function rule(s) {
+  if (s.meets_16h_rule === true)  return `<span class="rule ok">meets (${s.hours_reported}/24)</span>`;
+  if (s.meets_16h_rule === false) return `<span class="rule">${s.hours_reported}/24 h</span>`;
+  return `<span class="rule">unknown</span>`;
+}
+
+function renderReading(s) {
+  const bars = POLL.map(([k, l]) => {
+    const v = s[k];
+    return `<div class="bar ${v == null ? 'na' : ''}"><span class="lbl">${l}</span>
+      <div class="track"><div class="fill" style="width:${v == null ? 0 : v / 5}%;background:${bandColor(v)}"></div></div>
+      <span class="val mono">${v == null ? 'NA' : Math.round(v)}</span></div>`;
+  }).join('');
+  const when = new Date(s.hour_ts).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
+  const head = s.aqi == null
+    ? `<div class="aqi none">Insufficient data</div><div><span class="chip" style="background:var(--none)">${esc(s.insufficient_reason)}</span></div>`
+    : `<div class="aqi mono">${s.aqi}</div><div><span class="chip" style="background:${COLORS[s.category]}">${esc(s.category)}</span>
+       <div style="margin-top:6px;font-size:13px;color:var(--muted)">dominant <b style="color:var(--ink)">${esc(s.dominant)}</b></div></div>`;
+  const conf = s.distance_km != null
+    ? `<div class="conf" data-c="${s.confidence}"><b class="mono">${s.distance_km} km</b> away · <b>${s.confidence.replace('_',' ')}</b><br>${esc(s.confidence_note)}</div>` : '';
+  return `<div class="reading">${head}
+    <div class="station">${esc(s.station)}</div>
+    <div class="meta"><span>${esc(s.city)}, ${esc(s.state)}</span><span>${when} IST</span><span>${s.pollutants_reporting}/7 pollutants</span><span>16 h rule: ${rule(s)}</span></div>
+    </div>${conf}<div class="bars">${bars}</div>`;
+}
+
+function showStation(s, others = []) {
+  $('nearerr').hidden = true;
+  const more = others.length ? `<div class="others">${others.map(o =>
+    `<div><span>${esc(o.station)}</span><span class="mono">${o.aqi ?? '—'} · ${o.distance_km} km</span></div>`).join('')}</div>` : '';
+  $('near').innerHTML = renderReading(s) + more;
+}
+
+function renderTable(rows, title) {
+  $('citytitle').textContent = title;
+  $('rows').innerHTML = rows.map((s, i) => `<tr data-i="${i}">
+    <td class="num mono">${s.aqi ?? '—'}</td>
+    <td>${s.aqi == null ? `<span class="insuff">${esc(s.insufficient_reason)}</span>` : `<span class="dot" style="background:${COLORS[s.category]}"></span>${esc(s.category)}`}</td>
+    <td>${esc(s.station)}</td><td class="dom">${esc(s.dominant ?? '')}</td><td>${rule(s)}</td></tr>`).join('');
+  $('rows').onclick = e => { const tr = e.target.closest('tr'); if (tr) showStation(rows[+tr.dataset.i]); };
+}
+
+function selectCity(city) {
+  const rows = all.filter(s => s.city === city);
+  renderTable(rows, `${city} · ${rows.length} stations`);
+  const best = rows.find(s => s.aqi != null) || rows[0];
+  if (best) showStation(best);
+  try { localStorage.setItem('airpulse.city', city); } catch {}
+}
+
+async function locate() {
+  $('locate').disabled = true; $('locate').textContent = 'Locating…';
+  try {
+    const pos = await new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 10000, maximumAge: 300000 }));
+    const { latitude: lat, longitude: lon } = pos.coords;
+    const d = await api(`/api/nearest?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}&limit=4`);
+    if (!d.stations.length) throw new Error('No station has reported in the last 3 hours.');
+    showStation(d.stations[0], d.stations.slice(1));
+    $('city').value = d.stations[0].city;
+    const rows = all.filter(s => s.city === d.stations[0].city);
+    renderTable(rows, `${d.stations[0].city} · ${rows.length} stations`);
+  } catch (e) {
+    $('nearerr').textContent = e.code === 1 ? 'Location permission denied — pick a city instead.' : (e.message || 'Could not get your location.');
+    $('nearerr').hidden = false;
+  } finally { $('locate').disabled = false; $('locate').textContent = 'Use my location'; }
+}
+
+async function init() {
+  const h = await api('/api/health');
+  $('fresh').dataset.status = h.status;
+  $('freshtext').textContent = h.latest_hour ? `${h.age_minutes} min old · ${h.stations_with_aqi}/${h.stations} with AQI` : 'no data yet';
+
+  all = await api('/api/stations/latest');
+  const cities = [...new Set(all.map(s => s.city).filter(Boolean))].sort();
+  $('city').innerHTML = cities.map(c => `<option>${esc(c)}</option>`).join('');
+  let start = 'Mumbai';
+  try { start = localStorage.getItem('airpulse.city') || start; } catch {}
+  if (!cities.includes(start)) start = cities[0];
+  $('city').value = start;
+  selectCity(start);
+  $('city').onchange = e => selectCity(e.target.value);
+  $('locate').onclick = locate;
+}
+init().catch(e => { $('nearerr').textContent = 'API unreachable: ' + e.message; $('nearerr').hidden = false; });
+</script>
+</body>
+</html>

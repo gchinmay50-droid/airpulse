@@ -1,5 +1,7 @@
 # AirPulse — real-time air quality intelligence for India
 
+![CI](https://github.com/gchinmay50-droid/airpulse/actions/workflows/ci.yml/badge.svg)
+
 A streaming data pipeline that ingests India's live air-quality feed (CPCB via
 data.gov.in), processes it with **Apache Flink**, and computes a *trustworthy*
 per-station AQI — one that says "insufficient data" instead of inventing a number.
@@ -31,6 +33,7 @@ Every AQI app in India shows you a number. Almost none of them tell you:
 | Ingest | `src/producer.py` | Polls data.gov.in every 10 min, one Kafka message per (station, pollutant). Idempotent: fingerprint dedup on `(station, pollutant, last_update)`. |
 | Bronze | `src/sink.py` + `src/validate.py` | Consumer group with manual commits after each DB transaction. Pure-function validation rules (range 0–500, NA handling, junk rejection) covered by 15 tests. |
 | Gold | `flink/sql/station_aqi.sql` | **Job 1** — continuous `GROUP BY (station, hour)` upserted to Postgres; applies the sufficiency rules and records `insufficient_reason`. **Job 2** — 24 h event-time hopping window (slides hourly, 30-min watermark) computing per-station reporting completeness against the 16-hour rule. |
+| Serve | `api/main.py` + `api/static/` | FastAPI reading only the gold tables: `/api/health` (freshness), `/api/stations/latest`, `/api/nearest?lat&lon` (live stations only, with distance + confidence label). A dependency-free PWA frontend on top. |
 | CI | `.github/workflows/ci.yml` | pytest + `docker compose config` on every push. |
 
 Two Flink jobs use two deliberately different patterns: the headline AQI needs
@@ -73,12 +76,14 @@ MSYS_NO_PATHCONV=1 docker exec airpulse-jobmanager \
 # ingest
 python -m src.producer             # loops every 10 min; --once for a single cycle
 python -m src.sink                 # validation sink
+python -m uvicorn api.main:app --port 8010   # API + dashboard
 ```
 
 | UI | URL |
 |---|---|
 | Redpanda Console | http://localhost:8080 |
 | Flink dashboard | http://localhost:8081 |
+| AirPulse dashboard + API docs | http://localhost:8010 · http://localhost:8010/docs |
 | Postgres | `localhost:5432`, `airpulse`/`airpulse` |
 
 ```bash
@@ -90,6 +95,6 @@ python -m pytest tests/ -v
 - [x] Ingest + Kafka + validation sink + tests + CI
 - [x] Flink: station AQI with sufficiency rules; 24 h completeness windows
 - [ ] Data-quality layer: stuck sensors, dark stations, implausible jumps
-- [ ] Dashboard (FastAPI + PWA): city view, "AQI near me" with distance/confidence
+- [x] Dashboard (FastAPI + PWA): city view, "AQI near me" with distance/confidence
 - [ ] Cross-source validation against OpenAQ concentrations
 - [ ] GCP port: Pub/Sub + Cloud Run + BigQuery
