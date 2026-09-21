@@ -127,7 +127,9 @@ services:
     build: .
     container_name: airpulse-producer
     command: python -m src.producer --interval 600
-    env_file: .env                    # DATAGOV_API_KEY lives here, never in git
+    env_file:
+      - path: .env                  # DATAGOV_API_KEY lives here, never in git
+        required: false             # let the infra start even before the key is set
     environment:
       KAFKA_BOOTSTRAP: redpanda:9092
     depends_on:
@@ -169,7 +171,9 @@ services:
     container_name: airpulse-publisher
     command: python -m src.publish_gold --interval 300
     profiles: ["cloud"]
-    env_file: .env                    # CLOUD_DATABASE_URL
+    env_file:
+      - path: .env                  # CLOUD_DATABASE_URL
+        required: false
     environment:
       DATABASE_URL: postgresql://airpulse:airpulse@postgres:5432/airpulse
     depends_on:
