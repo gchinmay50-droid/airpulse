@@ -15,7 +15,7 @@ until curl -sf "$REST/overview" >/dev/null; do sleep 3; done
 # Wait for at least one TaskManager slot, or the job would be SCHEDULED forever.
 until [ "$(curl -sf "$REST/overview" | sed -n 's/.*"slots-total":\([0-9]*\).*/\1/p')" -gt 0 ]; do sleep 3; done
 
-running=$(curl -sf "$REST/jobs/overview" | tr ',' '\n' | sed -n 's/.*"name":"\([^"]*\)".*/\1/p; s/.*"state":"\([^"]*\)".*/\1/p' | paste - - | grep RUNNING || true)
+running=$(curl -sf "$REST/jobs/overview" | tr ',' '\n' | sed -n 's/.*"name":"\([^"]*\)".*/\1/p; s/.*"state":"\([^"]*\)".*/\1/p' | paste - - | grep -vE 'CANCELED|FAILED|FINISHED' || true)
 
 for f in /opt/flink/sql/*.sql; do
   # The sink table names in the file are what Flink names the jobs after.

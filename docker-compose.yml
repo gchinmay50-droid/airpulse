@@ -101,7 +101,7 @@ services:
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 4
+        taskmanager.numberOfTaskSlots: 8
         state.checkpoints.dir: file:///tmp/flink-checkpoints
     depends_on:
       - flink-jobmanager

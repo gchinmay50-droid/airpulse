@@ -1,0 +1,36 @@
+[
+  {
+    "run_at": "2026-09-21T10:07:01+00:00",
+    "machine": "Windows-10-10.0.19045-SP0",
+    "messages": 260064,
+    "stations": 516,
+    "hours": 72,
+    "publish_msgs_per_sec": 37088,
+    "publish_mb_per_sec": 14.9,
+    "flink_startup_sec": 24.4,
+    "flink_processing_sec": 29.9,
+    "flink_msgs_per_sec": 8683,
+    "flink_x_live_rate": 43417,
+    "gold_rows": 37152,
+    "gold_rows_with_aqi": 37115,
+    "flink_parallelism": 1,
+    "taskmanager_slots": 8
+  },
+  {
+    "run_at": "2026-09-21T10:07:56+00:00",
+    "machine": "Windows-10-10.0.19045-SP0",
+    "messages": 260064,
+    "stations": 516,
+    "hours": 72,
+    "publish_msgs_per_sec": 37750,
+    "publish_mb_per_sec": 15.2,
+    "flink_startup_sec": 26.0,
+    "flink_processing_sec": 7.4,
+    "flink_msgs_per_sec": 34909,
+    "flink_x_live_rate": 174544,
+    "gold_rows": 37152,
+    "gold_rows_with_aqi": 37115,
+    "flink_parallelism": 4,
+    "taskmanager_slots": 8
+  }
+]

@@ -21,3 +21,4 @@ flink/lib/*.jar
 
 # Runtime logs from producer/sink
 logs/
+bench/_job.sql
