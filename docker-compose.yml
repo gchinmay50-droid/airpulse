@@ -161,6 +161,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Optional: copy the gold tables to a cloud Postgres so the public dashboard
+  # (DEPLOY.md) stays current while this laptop is on.
+  #   docker compose --profile cloud up -d
+  publisher:
+    build: .
+    container_name: airpulse-publisher
+    command: python -m src.publish_gold --interval 300
+    profiles: ["cloud"]
+    env_file: .env                    # CLOUD_DATABASE_URL
+    environment:
+      DATABASE_URL: postgresql://airpulse:airpulse@postgres:5432/airpulse
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   redpanda-data:
   postgres-data:

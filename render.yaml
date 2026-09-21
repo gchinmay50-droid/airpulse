@@ -1,0 +1,16 @@
+# Render Blueprint: one free web service running the API + dashboard from the
+# repo Dockerfile. Import at https://dashboard.render.com/blueprints
+# (New > Blueprint > pick this repo). Set DATABASE_URL when prompted.
+services:
+  - type: web
+    name: airpulse
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false           # paste the Neon connection string in the dashboard
+      - key: PYTHONUNBUFFERED
+        value: "1"
