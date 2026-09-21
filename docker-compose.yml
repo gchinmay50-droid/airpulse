@@ -1,5 +1,6 @@
 # AirPulse local infrastructure.
-# Start:  docker compose up -d      Stop: docker compose down
+# Start:  docker compose up -d --build   Stop: docker compose down
+# That single command runs EVERYTHING: broker, DB, Flink + jobs, producer, sink, API.
 # Wipe:   docker compose down -v    (the -v deletes the data volume too)
 
 services:
@@ -7,6 +8,7 @@ services:
   # Redpanda = a Kafka-compatible broker in ONE binary, no ZooKeeper, no JVM.
   # Every Kafka client, tool and concept works unchanged against it.
   redpanda:
+    restart: unless-stopped
     image: redpandadata/redpanda:v25.3.17
     container_name: airpulse-redpanda
     command:
@@ -38,6 +40,7 @@ services:
 
   # Web UI to browse topics and read messages. Purely for our eyes.
   console:
+    restart: unless-stopped
     image: redpandadata/console:v3.11.0
     container_name: airpulse-console
     environment:
@@ -50,6 +53,7 @@ services:
 
   # Validated readings land here. Postgres 16; same tool as project 1.
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     container_name: airpulse-postgres
     environment:
@@ -71,6 +75,7 @@ services:
   # Apache Flink: the stream processor. JobManager schedules, TaskManager runs.
   # Same custom image for both (Flink + connector JARs), built from flink/Dockerfile.
   flink-jobmanager:
+    restart: unless-stopped
     build: ./flink
     container_name: airpulse-jobmanager
     command: jobmanager
@@ -89,6 +94,7 @@ services:
         condition: service_healthy
 
   flink-taskmanager:
+    restart: unless-stopped
     build: ./flink
     container_name: airpulse-taskmanager
     command: taskmanager
@@ -99,6 +105,61 @@ services:
         state.checkpoints.dir: file:///tmp/flink-checkpoints
     depends_on:
       - flink-jobmanager
+
+  # One-shot: submits every flink/sql/*.sql job, skipping ones already running.
+  flink-submit:
+    build: ./flink
+    container_name: airpulse-flink-submit
+    entrypoint: ["bash", "/opt/flink/submit.sh"]
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager
+    volumes:
+      - ./flink/sql:/opt/flink/sql:ro
+      - ./flink/submit.sh:/opt/flink/submit.sh:ro
+    depends_on:
+      - flink-taskmanager
+    restart: "no"
+
+  # ---- Python services, one image (./Dockerfile), three commands ----
+  producer:
+    build: .
+    container_name: airpulse-producer
+    command: python -m src.producer --interval 600
+    env_file: .env                    # DATAGOV_API_KEY lives here, never in git
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sink:
+    build: .
+    container_name: airpulse-sink
+    command: python -m src.sink
+    environment:
+      KAFKA_BOOTSTRAP: redpanda:9092
+      DATABASE_URL: postgresql://airpulse:airpulse@postgres:5432/airpulse
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build: .
+    container_name: airpulse-api
+    environment:
+      DATABASE_URL: postgresql://airpulse:airpulse@postgres:5432/airpulse
+    ports:
+      - "8010:8010"                   # dashboard + /docs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   redpanda-data:

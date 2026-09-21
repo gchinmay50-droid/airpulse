@@ -43,12 +43,21 @@ completeness AS (
     SELECT DISTINCT ON (station) station, hours_reported, meets_16h_rule
     FROM station_completeness_24h
     ORDER BY station, window_end DESC
+),
+jump_flags AS (
+    -- Pollutants with an implausible hour-over-hour swing in the last 3h -
+    -- same recency window /api/nearest uses to decide a station is "live".
+    SELECT station, array_agg(DISTINCT pollutant ORDER BY pollutant) AS flagged_pollutants
+    FROM station_pollutant_jumps
+    WHERE implausible AND hour_ts > now() - interval '3 hours'
+    GROUP BY station
 )
 SELECT l.station, l.city, l.state, l.latitude, l.longitude, l.hour_ts,
        l.aqi, l.category, l.dominant, l.pollutants_reporting, l.insufficient_reason,
        l.pm25, l.pm10, l.no2, l.so2, l.co, l.o3, l.nh3,
-       c.hours_reported, c.meets_16h_rule
-FROM latest l LEFT JOIN completeness c USING (station)
+       c.hours_reported, c.meets_16h_rule,
+       j.flagged_pollutants
+FROM latest l LEFT JOIN completeness c USING (station) LEFT JOIN jump_flags j USING (station)
 """
 
 
@@ -98,6 +107,21 @@ def station_history(station: str, hours: int = Query(48, ge=1, le=24 * 14)):
         """, (station, hours)).fetchall()
     if not rows:
         raise HTTPException(404, f"no data for station {station!r} in the last {hours}h")
+    return {"station": station, "hours": hours, "rows": rows}
+
+
+@app.get("/api/stations/{station}/jumps")
+def station_jumps(station: str, hours: int = Query(48, ge=1, le=24 * 14)):
+    """Hour-over-hour sub-index swings for a station, flagged or not."""
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT pollutant, hour_ts, idx, prev_idx, prev_hour_ts, jump, implausible
+            FROM station_pollutant_jumps
+            WHERE station = %s AND hour_ts > now() - make_interval(hours => %s)
+            ORDER BY hour_ts, pollutant
+        """, (station, hours)).fetchall()
+    if not rows:
+        raise HTTPException(404, f"no jump data for station {station!r} in the last {hours}h")
     return {"station": station, "hours": hours, "rows": rows}
 
 

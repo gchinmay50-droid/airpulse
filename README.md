@@ -33,7 +33,8 @@ Every AQI app in India shows you a number. Almost none of them tell you:
 | Ingest | `src/producer.py` | Polls data.gov.in every 10 min, one Kafka message per (station, pollutant). Idempotent: fingerprint dedup on `(station, pollutant, last_update)`. |
 | Bronze | `src/sink.py` + `src/validate.py` | Consumer group with manual commits after each DB transaction. Pure-function validation rules (range 0–500, NA handling, junk rejection) covered by 15 tests. |
 | Gold | `flink/sql/station_aqi.sql` | **Job 1** — continuous `GROUP BY (station, hour)` upserted to Postgres; applies the sufficiency rules and records `insufficient_reason`. **Job 2** — 24 h event-time hopping window (slides hourly, 30-min watermark) computing per-station reporting completeness against the 16-hour rule. |
-| Serve | `api/main.py` + `api/static/` | FastAPI reading only the gold tables: `/api/health` (freshness), `/api/stations/latest`, `/api/nearest?lat&lon` (live stations only, with distance + confidence label). A dependency-free PWA frontend on top. |
+| Gold | `flink/sql/station_data_quality.sql` | **Job 3** — continuous `LAG` per (station, pollutant) over the raw stream; flags an hour-over-hour sub-index swing of >150 points within 2 h as `implausible` (more likely a sensor fault than real air chemistry). Readings more than 2 h apart are never compared. |
+| Serve | `api/main.py` + `api/static/` | FastAPI reading only the gold tables: `/api/health` (freshness), `/api/stations/latest` (includes `flagged_pollutants`), `/api/stations/{station}/jumps`, `/api/nearest?lat&lon` (live stations only, with distance + confidence label). A dependency-free PWA frontend on top, with a ⚠ badge for flagged stations. |
 | CI | `.github/workflows/ci.yml` | pytest + `docker compose config` on every push. |
 
 Two Flink jobs use two deliberately different patterns: the headline AQI needs
@@ -68,10 +69,13 @@ docker compose up -d --build       # Redpanda, Console, Postgres, Flink
 # schema
 docker exec -i airpulse-postgres psql -U airpulse -d airpulse < sql/001_readings.sql
 docker exec -i airpulse-postgres psql -U airpulse -d airpulse < sql/002_station_aqi.sql
+docker exec -i airpulse-postgres psql -U airpulse -d airpulse < sql/003_data_quality.sql
 
 # Flink jobs (MSYS_NO_PATHCONV stops Git Bash mangling the container path)
 MSYS_NO_PATHCONV=1 docker exec airpulse-jobmanager \
   ./bin/sql-client.sh -f /opt/flink/sql/station_aqi.sql
+MSYS_NO_PATHCONV=1 docker exec airpulse-jobmanager \
+  ./bin/sql-client.sh -f /opt/flink/sql/station_data_quality.sql
 
 # ingest
 python -m src.producer             # loops every 10 min; --once for a single cycle
@@ -94,7 +98,7 @@ python -m pytest tests/ -v
 
 - [x] Ingest + Kafka + validation sink + tests + CI
 - [x] Flink: station AQI with sufficiency rules; 24 h completeness windows
-- [ ] Data-quality layer: stuck sensors, dark stations, implausible jumps
+- [ ] Data-quality layer: stuck sensors, dark stations; implausible jumps done
 - [x] Dashboard (FastAPI + PWA): city view, "AQI near me" with distance/confidence
 - [ ] Cross-source validation against OpenAQ concentrations
 - [ ] GCP port: Pub/Sub + Cloud Run + BigQuery

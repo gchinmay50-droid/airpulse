@@ -69,6 +69,9 @@
   .conf[data-c="indicative"]     { border-color: var(--moderate); }
   .conf[data-c="not_covered"]    { border-color: var(--verypoor); }
   .conf b { color: var(--ink); }
+  .jumpwarn { border-left: 3px solid var(--verypoor); padding-left: 10px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .jumpwarn b { color: var(--ink); }
+  .jumpflag { color: var(--verypoor); font-weight: 600; margin-left: 6px; cursor: help; }
 
   .bars { margin-top: 16px; display: grid; gap: 6px; }
   .bar { display: grid; grid-template-columns: 52px 1fr 36px; gap: 10px; align-items: center; font-size: 12px; }
@@ -140,6 +143,8 @@
   including PM<sub>2.5</sub> or PM<sub>10</sub>, worst sub-index wins. The “16 h rule” is CPCB’s requirement of 16 of the
   last 24 hours of data; “unknown” means the station has not been observed for a full 24 h window yet.
   Distance labels: under 5 km <b>representative</b>, 5–25 km <b>indicative</b>, beyond 25 km <b>not covered</b>.
+  A <span class="jumpflag" style="cursor:default">⚠</span> marks a pollutant whose sub-index swung more than 150 points within 2 hours -
+  implausible for real air chemistry, more likely a sensor fault.
 </footer>
 
 <script>
@@ -174,10 +179,12 @@ function renderReading(s) {
        <div style="margin-top:6px;font-size:13px;color:var(--muted)">dominant <b style="color:var(--ink)">${esc(s.dominant)}</b></div></div>`;
   const conf = s.distance_km != null
     ? `<div class="conf" data-c="${s.confidence}"><b class="mono">${s.distance_km} km</b> away · <b>${s.confidence.replace('_',' ')}</b><br>${esc(s.confidence_note)}</div>` : '';
+  const jumpwarn = s.flagged_pollutants?.length
+    ? `<div class="jumpwarn">⚠ <b>${esc(s.flagged_pollutants.join(', '))}</b> swung more than looks plausible in the last hour or two - likely a sensor fault, not real air.</div>` : '';
   return `<div class="reading">${head}
-    <div class="station">${esc(s.station)}</div>
+    <div class="station">${esc(s.station)}${s.flagged_pollutants?.length ? `<span class="jumpflag" title="Implausible reading swing">⚠</span>` : ''}</div>
     <div class="meta"><span>${esc(s.city)}, ${esc(s.state)}</span><span>${when} IST</span><span>${s.pollutants_reporting}/7 pollutants</span><span>16 h rule: ${rule(s)}</span></div>
-    </div>${conf}<div class="bars">${bars}</div>`;
+    </div>${conf}${jumpwarn}<div class="bars">${bars}</div>`;
 }
 
 function showStation(s, others = []) {
@@ -192,7 +199,7 @@ function renderTable(rows, title) {
   $('rows').innerHTML = rows.map((s, i) => `<tr data-i="${i}">
     <td class="num mono">${s.aqi ?? '—'}</td>
     <td>${s.aqi == null ? `<span class="insuff">${esc(s.insufficient_reason)}</span>` : `<span class="dot" style="background:${COLORS[s.category]}"></span>${esc(s.category)}`}</td>
-    <td>${esc(s.station)}</td><td class="dom">${esc(s.dominant ?? '')}</td><td>${rule(s)}</td></tr>`).join('');
+    <td>${esc(s.station)}${s.flagged_pollutants?.length ? `<span class="jumpflag" title="${esc(s.flagged_pollutants.join(', '))} swung implausibly">⚠</span>` : ''}</td><td class="dom">${esc(s.dominant ?? '')}</td><td>${rule(s)}</td></tr>`).join('');
   $('rows').onclick = e => { const tr = e.target.closest('tr'); if (tr) showStation(rows[+tr.dataset.i]); };
 }
 

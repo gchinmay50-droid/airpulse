@@ -1,0 +1,10 @@
+.venv/
+.git/
+logs/
+data/
+explore/
+flink/
+tests/
+__pycache__/
+*.local.json
+.env
