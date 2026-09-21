@@ -57,7 +57,8 @@
   .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   .btn:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  select { border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 10px; border-radius: 8px; }
+  select, input#city { border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 10px; border-radius: 8px; font: inherit; min-width: 150px; }
+  input#city:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .reading { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: end; }
   .aqi { font-size: 72px; line-height: 1; font-weight: 600; letter-spacing: -0.03em; }
@@ -104,6 +105,8 @@
   .maplegend span { display: inline-flex; align-items: center; gap: 6px; }
   .maplegend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
   .mapwrap { position: relative; }
+  .aqilbl { background: transparent; border: 0; box-shadow: none; color: var(--ink); font: 600 11px/1 "JetBrains Mono", monospace; padding: 0; text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 3px var(--bg); }
+  .aqilbl::before { display: none; }
 
   /* --- city table --- */
   .tablewrap { overflow-x: auto; }
@@ -139,7 +142,9 @@
     <div class="panel">
       <div class="controls">
         <button class="btn primary" id="locate">Use my location</button>
-        <select id="city" aria-label="Choose a city"></select>
+        <input id="city" list="cities" placeholder="Type a city…" aria-label="Choose a city" autocomplete="off">
+        <datalist id="cities"></datalist>
+        <button class="btn" id="allindia" title="Show every station">All India</button>
       </div>
       <div id="near"></div>
       <div class="err" id="nearerr" hidden></div>
@@ -207,10 +212,19 @@ function renderMarkers(list) {
       radius: s.aqi == null ? 5 : 7, color: dark ? '#0f141c' : '#ffffff', weight: 1.5,
       fillColor: catColor(s), fillOpacity: 0.9,
     }).bindPopup(`<b>${s.aqi ?? '—'}</b> ${esc(s.category ?? s.insufficient_reason ?? '')}<br>${esc(s.station)}<br><span style="color:var(--muted)">${esc(s.city)} · ${s.dominant ? 'dominant ' + esc(s.dominant) : ''}</span>`);
+    m.bindTooltip(String(s.aqi ?? '—'), { permanent: false, direction: 'top', offset: [0, -6], className: 'aqilbl', opacity: 1 });
     m.on('click', () => showStation(s));
     m.addTo(markers); byStation.set(s.station, m);
   }
+  applyLabelMode();
 }
+// Numbers on every marker at city zoom; hover-only when zoomed out so India isn't a wall of digits.
+function applyLabelMode() {
+  const perm = map.getZoom() >= 9;
+  markers.eachLayer(m => { const tt = m.getTooltip(); if (!tt || tt.options.permanent === perm) return;
+    const txt = tt.getContent(); m.unbindTooltip(); m.bindTooltip(txt, { permanent: perm, direction: 'top', offset: [0, -6], className: 'aqilbl', opacity: 1 }); });
+}
+map.on('zoomend', applyLabelMode);
 function fitTo(list, pad = 0.15) {
   const pts = list.filter(s => s.latitude != null).map(s => [s.latitude, s.longitude]);
   if (!pts.length) return;
@@ -263,10 +277,17 @@ function renderTable(rows, title) {
   $('rows').onclick = e => { const tr = e.target.closest('tr'); if (tr) showStation(rows[+tr.dataset.i]); };
 }
 
+function selectAll() {
+  const rows = [...all].sort((a, b) => (b.aqi ?? -1) - (a.aqi ?? -1)).slice(0, 100);
+  renderTable(rows, `All India · worst 100 of ${all.length} stations`);
+  $('city').value = '';
+  map.closePopup(); fitTo(all, 0.05);
+}
 function selectCity(city) {
   const rows = all.filter(s => s.city === city);
+  if (!rows.length) return;
   renderTable(rows, `${city} · ${rows.length} stations`);
-  renderMarkers(rows); fitTo(rows);
+  fitTo(rows);
   const best = rows.find(s => s.aqi != null) || rows[0];
   if (best) showStation(best);
   try { localStorage.setItem('airpulse.city', city); } catch {}
@@ -282,7 +303,6 @@ async function locate() {
     $('city').value = d.stations[0].city;
     const rows = all.filter(s => s.city === d.stations[0].city);
     renderTable(rows, `${d.stations[0].city} · ${rows.length} stations`);
-    renderMarkers(rows);
     if (youMarker) youMarker.remove();
     youMarker = L.circleMarker([lat, lon], { radius: 8, color: css('--accent'), weight: 3, fillColor: css('--accent'), fillOpacity: 0.35 })
       .bindTooltip('You', { permanent: true, direction: 'top', offset: [0, -8] }).addTo(map);
@@ -301,13 +321,18 @@ async function init() {
 
   all = await api('/api/stations/latest');
   const cities = [...new Set(all.map(s => s.city).filter(Boolean))].sort();
-  $('city').innerHTML = cities.map(c => `<option>${esc(c)}</option>`).join('');
+  $('cities').innerHTML = cities.map(c => `<option value="${esc(c)}">`).join('');
+  renderMarkers(all);
   let start = 'Mumbai';
   try { start = localStorage.getItem('airpulse.city') || start; } catch {}
   if (!cities.includes(start)) start = cities[0];
   $('city').value = start;
   selectCity(start);
-  $('city').onchange = e => selectCity(e.target.value);
+  const pick = () => { const v = $('city').value.trim(); const c = cities.find(x => x.toLowerCase() === v.toLowerCase()); if (c) { $('city').value = c; selectCity(c); } };
+  $('city').onchange = pick;
+  $('city').onkeydown = e => { if (e.key === 'Enter') pick(); };
+  $('city').onfocus = () => $('city').select();
+  $('allindia').onclick = selectAll;
   $('locate').onclick = locate;
 }
 init().catch(e => { $('nearerr').textContent = 'API unreachable: ' + e.message; $('nearerr').hidden = false; });
