@@ -213,7 +213,16 @@ function renderMarkers(list) {
       fillColor: catColor(s), fillOpacity: 0.9,
     }).bindPopup(`<b>${s.aqi ?? '—'}</b> ${esc(s.category ?? s.insufficient_reason ?? '')}<br>${esc(s.station)}<br><span style="color:var(--muted)">${esc(s.city)} · ${s.dominant ? 'dominant ' + esc(s.dominant) : ''}</span>`);
     m.bindTooltip(String(s.aqi ?? '—'), { permanent: false, direction: 'top', offset: [0, -6], className: 'aqilbl', opacity: 1 });
-    m.on('click', () => showStation(s));
+    // A marker click selects the station AND its city (picker + table), without moving the map away.
+    m.on('click', () => {
+      if ($('city').value !== s.city) {
+        const rows = all.filter(x => x.city === s.city);
+        renderTable(rows, `${s.city} · ${rows.length} stations`);
+        $('city').value = s.city;
+        try { localStorage.setItem('airpulse.city', s.city); } catch {}
+      }
+      showStation(s);
+    });
     m.addTo(markers); byStation.set(s.station, m);
   }
   applyLabelMode();
