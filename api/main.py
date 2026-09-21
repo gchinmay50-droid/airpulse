@@ -44,6 +44,14 @@ completeness AS (
     FROM station_completeness_24h
     ORDER BY station, window_end DESC
 ),
+stuck_flags AS (
+    -- Pollutants whose LATEST reading is part of a frozen run.
+    SELECT station, array_agg(pollutant ORDER BY pollutant) AS stuck_pollutants
+    FROM (SELECT DISTINCT ON (station, pollutant) station, pollutant, stuck
+          FROM station_pollutant_stuck ORDER BY station, pollutant, hour_ts DESC) t
+    WHERE stuck
+    GROUP BY station
+),
 jump_flags AS (
     -- Pollutants with an implausible hour-over-hour swing in the last 3h -
     -- same recency window /api/nearest uses to decide a station is "live".
@@ -123,6 +131,60 @@ def station_jumps(station: str, hours: int = Query(48, ge=1, le=24 * 14)):
     if not rows:
         raise HTTPException(404, f"no jump data for station {station!r} in the last {hours}h")
     return {"station": station, "hours": hours, "rows": rows}
+
+
+@app.get("/api/quality")
+def quality(hours: int = Query(24, ge=1, le=24 * 7)):
+    """Data-health summary: dark stations, stuck sensors, implausible jumps.
+
+    "Dark" is measured against the feed's own latest hour, not the wall clock:
+    CPCB publishes ~1h late, and a laptop that was asleep must not make every
+    station look dead.
+    """
+    with db() as conn:
+        latest = conn.execute("SELECT max(hour_ts) AS h FROM station_aqi_hourly").fetchone()["h"]
+        dark = conn.execute("""
+            SELECT station, city, state, max(hour_ts) AS last_seen,
+                   round(extract(epoch FROM (%s - max(hour_ts))) / 3600) AS hours_dark
+            FROM station_aqi_hourly
+            GROUP BY station, city, state
+            HAVING max(hour_ts) <= %s - interval '6 hours'
+            ORDER BY hours_dark DESC, station
+        """, (latest, latest)).fetchall()
+        stuck = conn.execute("""
+            SELECT t.station, t.pollutant, t.idx, t.readings_6h, t.hour_ts
+            FROM (SELECT DISTINCT ON (station, pollutant) *
+                  FROM station_pollutant_stuck ORDER BY station, pollutant, hour_ts DESC) t
+            WHERE t.stuck AND t.hour_ts > %s - interval '3 hours'
+            ORDER BY t.idx DESC, t.station
+        """, (latest,)).fetchall()
+        jumps = conn.execute("""
+            SELECT station, pollutant, hour_ts, prev_idx, idx, jump
+            FROM station_pollutant_jumps
+            WHERE implausible AND hour_ts > %s - make_interval(hours => %s)
+            ORDER BY abs(jump) DESC
+        """, (latest, hours)).fetchall()
+        totals = conn.execute("""
+            SELECT count(DISTINCT station) AS stations,
+                   count(*) FILTER (WHERE hour_ts = %s) AS reporting_now,
+                   count(*) FILTER (WHERE hour_ts = %s AND aqi IS NOT NULL) AS aqi_now
+            FROM station_aqi_hourly
+        """, (latest, latest)).fetchone()
+    return {
+        "latest_hour": latest,
+        "summary": {
+            "stations_known": totals["stations"],
+            "reporting_latest_hour": totals["reporting_now"],
+            "with_valid_aqi": totals["aqi_now"],
+            "dark_stations": len(dark),
+            "stuck_sensors": len(stuck),
+            "implausible_jumps": len(jumps),
+            "window_hours": hours,
+        },
+        "dark_stations": dark,
+        "stuck_sensors": stuck,
+        "implausible_jumps": jumps,
+    }
 
 
 @app.get("/api/nearest")

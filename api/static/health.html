@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AirPulse Data Health</title>
+<meta name="description" content="Which CPCB stations are dark, which sensors are frozen, and which readings jumped implausibly.">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1b2433">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --bg: #f3f5f8; --surface: #ffffff; --line: #d9dfe8; --ink: #1b2433; --muted: #5b6676;
+    --accent: #3b48c4; --good: #2e9e4f; --warn: #e2b52a; --bad: #d0342c; --none: #8a94a3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0f141c; --surface: #18202b; --line: #2a3442; --ink: #e8edf4; --muted: #94a0b2; --accent: #8c96f2; }
+  }
+  :root[data-theme="dark"] { --bg: #0f141c; --surface: #18202b; --line: #2a3442; --ink: #e8edf4; --muted: #94a0b2; --accent: #8c96f2; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 15px/1.5 Manrope, system-ui, sans-serif; padding-inline: 16px; padding-block: 0 48px; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); }
+  header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 2; background: var(--bg); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 14px 10px; border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 20px; }
+  .brand a { color: inherit; text-decoration: none; }
+  .brand small { font-weight: 500; color: var(--muted); font-size: 12px; margin-left: 8px; letter-spacing: 0.06em; text-transform: uppercase; }
+  nav { font-size: 13px; color: var(--muted); }
+  main { max-width: 1040px; margin-inline: auto; display: grid; gap: 24px; padding-top: 20px; }
+  h2 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  h2 span { font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .tile .n { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+  .tile .l { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .tile[data-sev="bad"] .n { color: var(--bad); }
+  .tile[data-sev="warn"] .n { color: var(--warn); }
+  .tile[data-sev="good"] .n { color: var(--good); }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  p.note { color: var(--muted); font-size: 13px; margin: 6px 0 0; max-width: 70ch; }
+  footer { max-width: 1040px; margin: 28px auto 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><a href="/">AirPulse</a> <small>Data health</small></div>
+  <nav><a href="/">Dashboard</a> · <a href="/docs">API</a></nav>
+</header>
+
+<main>
+  <section>
+    <h2>Feed status <span id="asof" class="mono"></span></h2>
+    <div class="tiles" id="tiles"></div>
+    <p class="note">Every figure here is computed by Apache Flink from the raw stream, not by the feed. CPCB publishes
+      no quality flags; these are the checks a public AQI number should have had before it was shown to anyone.</p>
+  </section>
+
+  <section>
+    <h2>Dark stations <span id="darkcount"></span></h2>
+    <p class="note">No reading for 6+ hours, measured against the feed's own latest hour. A dark station still appears in
+      most apps with its last number, however old. AirPulse drops it from "near me".</p>
+    <div class="tablewrap"><table><thead><tr><th>Station</th><th>City</th><th>Last seen (IST)</th><th class="num">Hours dark</th></tr></thead><tbody id="dark"></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Stuck sensors <span id="stuckcount"></span></h2>
+    <p class="note">Identical sub-index for 5+ consecutive hours at a value of 20 or more. Below 20, integer rounding of a low
+      concentration flatlines legitimately (measured: 74% of all identical runs). A frozen PM2.5 at 181 feeds a false "Poor"
+      to every app in the city. Emitted one hour behind: an event-time window waits for the watermark.</p>
+    <div class="tablewrap"><table><thead><tr><th>Station</th><th>Pollutant</th><th class="num">Frozen at</th><th class="num">Hours</th><th>As of (IST)</th></tr></thead><tbody id="stuck"></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Implausible jumps <span id="jumpcount"></span></h2>
+    <p class="note">A sub-index swing of more than 150 points between consecutive readings no more than 2 hours apart —
+      two or three CPCB categories in an hour. Real air rarely does that; sensors and feed transcription do.</p>
+    <div class="tablewrap"><table><thead><tr><th>Station</th><th>Pollutant</th><th class="num">Before</th><th class="num">After</th><th class="num">Jump</th><th>Hour (IST)</th></tr></thead><tbody id="jumps"></tbody></table></div>
+  </section>
+</main>
+
+<footer>Stuck sensors: Flink event-time OVER window, 6 h RANGE frame. Jumps: LAG over each (station, pollutant) partition.
+  Dark stations: query-time absence check against the gold table. Window for jumps: last 24 h.</footer>
+
+<script>
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const $ = id => document.getElementById(id);
+const ist = iso => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+const tile = (n, l, sev) => `<div class="tile" data-sev="${sev}"><div class="n mono">${n}</div><div class="l">${l}</div></div>`;
+const rows = (id, list, fn, emptyMsg) => { $(id).innerHTML = list.length ? list.map(fn).join('') : `<tr><td colspan="6" class="empty">${emptyMsg}</td></tr>`; };
+
+(async () => {
+  const q = await (await fetch('/api/quality?hours=24')).json();
+  const s = q.summary;
+  $('asof').textContent = q.latest_hour ? `as of ${ist(q.latest_hour)} IST` : '';
+  $('tiles').innerHTML =
+    tile(s.reporting_latest_hour, `of ${s.stations_known} stations reporting`, 'good') +
+    tile(s.with_valid_aqi, 'with a valid AQI', 'good') +
+    tile(s.dark_stations, 'dark stations (6 h+)', s.dark_stations ? 'bad' : 'good') +
+    tile(s.stuck_sensors, 'stuck sensors', s.stuck_sensors ? 'warn' : 'good') +
+    tile(s.implausible_jumps, 'implausible jumps, 24 h', s.implausible_jumps ? 'warn' : 'good');
+  $('darkcount').textContent = `${q.dark_stations.length}`;
+  $('stuckcount').textContent = `${q.stuck_sensors.length}`;
+  $('jumpcount').textContent = `${q.implausible_jumps.length}`;
+  rows('dark', q.dark_stations, r => `<tr><td>${esc(r.station)}</td><td>${esc(r.city)}</td><td class="mono">${ist(r.last_seen)}</td><td class="num mono">${r.hours_dark}</td></tr>`, 'Every known station has reported in the last 6 hours.');
+  rows('stuck', q.stuck_sensors, r => `<tr><td>${esc(r.station)}</td><td>${esc(r.pollutant)}</td><td class="num mono">${Math.round(r.idx)}</td><td class="num mono">${r.readings_6h}</td><td class="mono">${ist(r.hour_ts)}</td></tr>`, 'No sensor is frozen in the latest evaluated hour.');
+  rows('jumps', q.implausible_jumps, r => `<tr><td>${esc(r.station)}</td><td>${esc(r.pollutant)}</td><td class="num mono">${Math.round(r.prev_idx)}</td><td class="num mono">${Math.round(r.idx)}</td><td class="num mono">${r.jump > 0 ? '+' : ''}${Math.round(r.jump)}</td><td class="mono">${ist(r.hour_ts)}</td></tr>`, 'No implausible jumps in the last 24 hours.');
+})().catch(e => { $('tiles').innerHTML = `<div class="empty">API unreachable: ${esc(e.message)}</div>`; });
+</script>
+</body>
+</html>

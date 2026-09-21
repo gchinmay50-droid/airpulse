@@ -6,7 +6,7 @@ set -euo pipefail
 REST=${FLINK_REST:-http://flink-jobmanager:8081}
 # This container bypasses Flink's entrypoint, so point the SQL client at the
 # cluster ourselves (Flink 1.20 reads conf/config.yaml).
-printf 'rest.address: flink-jobmanager
+grep -q '^rest.address:' /opt/flink/conf/config.yaml || printf 'rest.address: flink-jobmanager
 jobmanager.rpc.address: flink-jobmanager
 ' >> /opt/flink/conf/config.yaml
 
