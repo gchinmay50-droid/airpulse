@@ -9,6 +9,8 @@
 <meta name="theme-color" content="#1b2433">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root {
     --bg: #f3f5f8;         --surface: #ffffff;    --line: #d9dfe8;
@@ -86,6 +88,23 @@
   .others div { display: flex; justify-content: space-between; gap: 10px; }
   .others span:last-child { color: var(--muted); white-space: nowrap; }
 
+  /* --- map --- */
+  #map { height: 300px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 14px; background: var(--surface); }
+  @media (min-width: 860px) { #map { height: 380px; } }
+  .leaflet-container { font: inherit; }
+  /* OSM only ships a light style; invert it for dark mode and desaturate so markers stay the loudest colour */
+  .tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.4); }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--surface); color: var(--ink); box-shadow: 0 2px 12px rgba(0,0,0,.25); }
+  .leaflet-popup-content { margin: 10px 12px; font-size: 13px; line-height: 1.4; }
+  .leaflet-popup-content b { font-size: 15px; }
+  .leaflet-control-attribution { font-size: 10px; background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted) !important; }
+  .leaflet-control-attribution a { color: var(--accent); }
+  .leaflet-bar a { background: var(--surface); color: var(--ink); border-bottom-color: var(--line); }
+  .maplegend { position: absolute; z-index: 500; right: 10px; top: 10px; background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-size: 11px; display: grid; gap: 3px; }
+  .maplegend span { display: inline-flex; align-items: center; gap: 6px; }
+  .maplegend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .mapwrap { position: relative; }
+
   /* --- city table --- */
   .tablewrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -129,6 +148,15 @@
 
   <section>
     <h2 id="citytitle">Stations</h2>
+    <div class="mapwrap">
+      <div id="map" role="img" aria-label="Map of monitoring stations coloured by AQI category"></div>
+      <div class="maplegend" aria-hidden="true">
+        <span><i style="background:var(--good)"></i>Good</span><span><i style="background:var(--satisfactory)"></i>Satisfactory</span>
+        <span><i style="background:var(--moderate)"></i>Moderate</span><span><i style="background:var(--poor)"></i>Poor</span>
+        <span><i style="background:var(--verypoor)"></i>Very Poor</span><span><i style="background:var(--severe)"></i>Severe</span>
+        <span><i style="background:var(--none)"></i>Insufficient</span>
+      </div>
+    </div>
     <div class="tablewrap">
       <table>
         <thead><tr><th class="num">AQI</th><th>Category</th><th>Station</th><th class="dom">Dominant</th><th>16 h rule</th></tr></thead>
@@ -158,6 +186,37 @@ const $ = id => document.getElementById(id);
 const api = async p => { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).detail || r.statusText); return r.json(); };
 
 let all = [];
+
+// ---- map (Leaflet + CARTO basemap, themed) ----
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([21.5, 79], 5);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18, className: dark ? 'tiles-dark' : '',
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+const markers = L.layerGroup().addTo(map);
+let youMarker = null, byStation = new Map();
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const catColor = s => s.aqi == null ? css('--none') : { Good: '--good', Satisfactory: '--satisfactory', Moderate: '--moderate', Poor: '--poor', 'Very Poor': '--verypoor', Severe: '--severe' }[s.category] ? css({ Good: '--good', Satisfactory: '--satisfactory', Moderate: '--moderate', Poor: '--poor', 'Very Poor': '--verypoor', Severe: '--severe' }[s.category]) : css('--none');
+
+function renderMarkers(list) {
+  markers.clearLayers(); byStation.clear();
+  for (const s of list) {
+    if (s.latitude == null || s.longitude == null) continue;
+    const m = L.circleMarker([s.latitude, s.longitude], {
+      radius: s.aqi == null ? 5 : 7, color: dark ? '#0f141c' : '#ffffff', weight: 1.5,
+      fillColor: catColor(s), fillOpacity: 0.9,
+    }).bindPopup(`<b>${s.aqi ?? '—'}</b> ${esc(s.category ?? s.insufficient_reason ?? '')}<br>${esc(s.station)}<br><span style="color:var(--muted)">${esc(s.city)} · ${s.dominant ? 'dominant ' + esc(s.dominant) : ''}</span>`);
+    m.on('click', () => showStation(s));
+    m.addTo(markers); byStation.set(s.station, m);
+  }
+}
+function fitTo(list, pad = 0.15) {
+  const pts = list.filter(s => s.latitude != null).map(s => [s.latitude, s.longitude]);
+  if (!pts.length) return;
+  if (pts.length === 1) map.setView(pts[0], 12);
+  else map.fitBounds(L.latLngBounds(pts).pad(pad), { maxZoom: 13 });
+}
 
 function rule(s) {
   if (s.meets_16h_rule === true)  return `<span class="rule ok">meets (${s.hours_reported}/24)</span>`;
@@ -189,6 +248,7 @@ function renderReading(s) {
 
 function showStation(s, others = []) {
   $('nearerr').hidden = true;
+  const m = byStation.get(s.station); if (m) m.openPopup();
   const more = others.length ? `<div class="others">${others.map(o =>
     `<div><span>${esc(o.station)}</span><span class="mono">${o.aqi ?? '—'} · ${o.distance_km} km</span></div>`).join('')}</div>` : '';
   $('near').innerHTML = renderReading(s) + more;
@@ -206,6 +266,7 @@ function renderTable(rows, title) {
 function selectCity(city) {
   const rows = all.filter(s => s.city === city);
   renderTable(rows, `${city} · ${rows.length} stations`);
+  renderMarkers(rows); fitTo(rows);
   const best = rows.find(s => s.aqi != null) || rows[0];
   if (best) showStation(best);
   try { localStorage.setItem('airpulse.city', city); } catch {}
@@ -218,10 +279,15 @@ async function locate() {
     const { latitude: lat, longitude: lon } = pos.coords;
     const d = await api(`/api/nearest?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}&limit=4`);
     if (!d.stations.length) throw new Error('No station has reported in the last 3 hours.');
-    showStation(d.stations[0], d.stations.slice(1));
     $('city').value = d.stations[0].city;
     const rows = all.filter(s => s.city === d.stations[0].city);
     renderTable(rows, `${d.stations[0].city} · ${rows.length} stations`);
+    renderMarkers(rows);
+    if (youMarker) youMarker.remove();
+    youMarker = L.circleMarker([lat, lon], { radius: 8, color: css('--accent'), weight: 3, fillColor: css('--accent'), fillOpacity: 0.35 })
+      .bindTooltip('You', { permanent: true, direction: 'top', offset: [0, -8] }).addTo(map);
+    fitTo([{ latitude: lat, longitude: lon }, ...d.stations], 0.3);
+    showStation(d.stations[0], d.stations.slice(1));
   } catch (e) {
     $('nearerr').textContent = e.code === 1 ? 'Location permission denied — pick a city instead.' : (e.message || 'Could not get your location.');
     $('nearerr').hidden = false;
