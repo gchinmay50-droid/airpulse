@@ -5,7 +5,8 @@
 ![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB)
 ![Docker Compose](https://img.shields.io/badge/docker%20compose-one%20command-2496ED)
 
-**Live dashboard:** _coming — see [DEPLOY.md](DEPLOY.md)_ · **API docs:** `/docs` on the same host
+**Live:** https://airpulse-j9m3.onrender.com · [data health](https://airpulse-j9m3.onrender.com/health.html) · [API docs](https://airpulse-j9m3.onrender.com/docs)
+_(free tier: the first request after 15 idle minutes takes ~40 s to wake)_
 
 A streaming pipeline that ingests India's live government air-quality feed
 (CPCB via data.gov.in), processes it with **Apache Flink**, and publishes a

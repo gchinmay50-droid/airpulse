@@ -1,5 +1,7 @@
 # Deploying the public dashboard (free, no card)
 
+Current deployment: https://airpulse-j9m3.onrender.com (Render, Singapore) reading Neon (Singapore).
+
 Flink has no free tier anywhere, so the split is:
 
 ```
